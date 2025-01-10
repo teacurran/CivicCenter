@@ -1,0 +1,224 @@
+version: "3.9"
+
+x-api-base: &api-base
+  image: api-server
+  build:
+    context: ./api
+    dockerfile: src/main/docker/dev-jvm.dockerfile
+  depends_on:
+    - main-db
+    - main-db-migrations
+    - jaeger
+  volumes:
+    - ./api:/app
+    - ~/.config/gcloud:/tmp/.config/gcloud
+    # - maven_cache:/app/.m2
+    # use virtual volume if having issues with native binaries
+    # - maven_target:/app/target
+  environment:
+    SERVICE: local
+    GCLOUD_PROJECT: "dissipate"
+    GOOGLE_APPLICATION_CREDENTIALS: /tmp/.config/gcloud/application_default_credentials.json
+    QUARKUS_DATASOURCE_REACTIVE_URL: vertx-reactive:postgresql://main-db:5432/dissipate
+    QUARKUS_DATASOURCE_USERNAME: dissipate
+    QUARKUS_DATASOURCE_PASSWORD: dissipate
+    QUARKUS_HIBERNATE_ORM_DATABASE_GENERATION: update
+    QUARKUS_HTTP_HOST: 0.0.0.0
+    QUARKUS_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4317
+    QUARKUS_MAILER_HOST: mailpit
+    QUARKUS_MAILER_PORT: 1025
+    QUARKUS_MAILPIT_HTTP_SERVER: http://mailpit:8025
+  command:
+    mvn
+    quarkus:dev
+    -Ddebug=true
+    -DdebugHost=0.0.0.0
+
+services:
+  api:
+    image: api-server
+    build:
+      context: ./api
+      dockerfile: src/main/docker/dev-jvm.dockerfile
+    depends_on:
+      - main-db
+      - main-db-migrations
+      - jaeger
+    volumes:
+      - ./api:/app
+      - ~/.config/gcloud:/tmp/.config/gcloud
+      # - maven_cache:/app/.m2
+      # use virtual volume if having issues with native binaries
+      # - maven_target:/app/target
+    environment:
+      SERVICE: local
+      GCLOUD_PROJECT: "dissipate"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: 98puOInkjbO&YiubkBt8guhvjhvredrg
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/.config/gcloud/application_default_credentials.json
+      QUARKUS_DATASOURCE_REACTIVE_URL: vertx-reactive:postgresql://main-db:5432/dissipate
+      QUARKUS_DATASOURCE_USERNAME: dissipate
+      QUARKUS_DATASOURCE_PASSWORD: dissipate
+      QUARKUS_DATASOURCE_READDB_REACTIVE_URL: vertx-reactive:postgresql://read-db:5432/dissipate
+      QUARKUS_DATASOURCE_READDB_USERNAME: dissipate
+      QUARKUS_DATASOURCE_READDB_PASSWORD: dissipate
+      QUARKUS_HIBERNATE_ORM_DATABASE_GENERATION: update
+      QUARKUS_HTTP_HOST: 0.0.0.0
+      QUARKUS_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4317
+    command:
+      mvn
+      quarkus:dev
+      -Ddebug=true
+      -Dquarkus.http.host=0.0.0.0
+      -DdebugHost=0.0.0.0
+      -P development
+    ports:
+      - "5005:5005"
+      - "8080:8080"
+      - "9299:9000"
+
+  main-db:
+    image: postgis/postgis
+    user: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: dissipate
+      POSTGRES_PASSWORD: dissipate
+      POSTGRES_DB: dissipate
+      POSTGRES_HOST_AUTH_METHOD: "scram-sha-256\nhost replication all 0.0.0.0/0 md5"
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    command: |
+      postgres
+      -c wal_level=replica
+      -c hot_standby=on
+      -c max_wal_senders=10
+      -c max_replication_slots=10
+      -c hot_standby_feedback=on
+      -c log_statement=all
+    volumes:
+      - ./docker-compose/00_init_replication.sql:/docker-entrypoint-initdb.d/00_init_replication.sql
+      - main-db:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: 'pg_isready -U dissipate --dbname=postgres'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  read-db:
+    image: postgis/postgis
+    user: postgres
+    restart: always
+    environment:
+      PGUSER: replicator
+      PGPASSWORD: replicator_password
+    command: |
+      bash -c "
+      until pg_basebackup --pgdata=/var/lib/postgresql/data -R --slot=replication_slot --host=main-db --port=5432
+      do
+      echo 'Waiting for primary to connect...'
+      sleep 1s
+      done
+      echo 'Backup done, starting replica...'
+      chmod 0700 /var/lib/postgresql/data
+      postgres
+      "
+    depends_on:
+      - main-db
+    volumes:
+      - read-db:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: 'pg_isready -U dissipate --dbname=postgres'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Jaeger
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16685:16685"
+      - "16686:16686"
+      - "14268:14268"
+      - "14250:14250"
+      - "4317:4317"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      LOG_LEVEL: debug
+
+  #  redis:
+#    image: "redis:alpine"
+#    restart: always
+#    ports:
+#      - '6379:6379'
+#    command: redis-server --save 20 1 --loglevel warning --requirepass 98puOInkjbO&YiubkBt8guhvjhvredrg
+
+  main-db-migrations:
+    image: api-server
+    build:
+      context: ./api
+      dockerfile: src/main/docker/dev-jvm.dockerfile
+    depends_on:
+      - main-db
+    volumes:
+      - ./api:/app
+      - maven_target:/app/target
+      - maven_cache:/app/.m2
+    command:
+      - mvn
+      - flyway:migrate
+      - -Dflyway.url=jdbc:postgresql://main-db:5432/dissipate
+      - -Dflyway.user=dissipate
+      - -Dflyway.password=dissipate
+
+  mailpit:
+    image: axllent/mailpit
+    container_name: mailpit
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_DATABASE: /data/mailpit.db
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+  integration-tests:
+    <<: *api-base
+    command: mvn verify
+
+  sonar-scanner:
+    <<: *api-base
+    volumes:
+      - ./:/app
+      - ~/.config/gcloud:/tmp/.config/gcloud
+    command:
+      - mvn
+      - verify
+      - sonar:sonar
+      - -Dsonar.token=${SONAR_TOKEN}
+      - -Dsonar.host.url=https://sonarcloud.io
+      - -DGOOGLE_APPLICATION_CREDENTIALS=/app/cloudbuild_credentials.json
+      - -e
+
+#  zookeeper:
+#    image: 'wurstmeister/zookeeper:latest'
+#    ports:
+#      - '22181:2181'
+#    environment:
+#      - ALLOW_ANONYMOUS_LOGIN=yes
+
+volumes:
+  main-db:
+  read-db:
+  maven_cache:
+  maven_target:
+  mailpit_data:
+
