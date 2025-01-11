@@ -39,7 +39,7 @@ services:
     image: api-server
     build:
       context: ./api
-      dockerfile: src/main/docker/dev-jvm.dockerfile
+      dockerfile: src/main/docker/dev.dockerfile
     depends_on:
       - main-db
       - main-db-migrations
@@ -107,36 +107,6 @@ services:
       timeout: 5s
       retries: 5
 
-  read-db:
-    image: postgis/postgis
-    user: postgres
-    restart: always
-    environment:
-      PGUSER: replicator
-      PGPASSWORD: replicator_password
-    command: |
-      bash -c "
-      until pg_basebackup --pgdata=/var/lib/postgresql/data -R --slot=replication_slot --host=main-db --port=5432
-      do
-      echo 'Waiting for primary to connect...'
-      sleep 1s
-      done
-      echo 'Backup done, starting replica...'
-      chmod 0700 /var/lib/postgresql/data
-      postgres
-      "
-    depends_on:
-      - main-db
-    volumes:
-      - read-db:/var/lib/postgresql/data
-    ports:
-      - "5434:5432"
-    healthcheck:
-      test: 'pg_isready -U dissipate --dbname=postgres'
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # Jaeger
   jaeger:
     image: jaegertracing/all-in-one:latest
@@ -161,7 +131,7 @@ services:
     image: api-server
     build:
       context: ./api
-      dockerfile: src/main/docker/dev-jvm.dockerfile
+      dockerfile: src/main/docker/dev.dockerfile
     depends_on:
       - main-db
     volumes:
