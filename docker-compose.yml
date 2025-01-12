@@ -38,14 +38,14 @@ services:
   api:
     image: api-server
     build:
-      context: ./api
+      context: ./app
       dockerfile: src/main/docker/dev.dockerfile
     depends_on:
       - main-db
       - main-db-migrations
       - jaeger
     volumes:
-      - ./api:/app
+      - ./app:/app
       - ~/.config/gcloud:/tmp/.config/gcloud
       # - maven_cache:/app/.m2
       # use virtual volume if having issues with native binaries
@@ -56,13 +56,9 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: 98puOInkjbO&YiubkBt8guhvjhvredrg
-      GOOGLE_APPLICATION_CREDENTIALS: /tmp/.config/gcloud/application_default_credentials.json
-      QUARKUS_DATASOURCE_REACTIVE_URL: vertx-reactive:postgresql://main-db:5432/dissipate
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://main-db:5432/dissipate
       QUARKUS_DATASOURCE_USERNAME: dissipate
       QUARKUS_DATASOURCE_PASSWORD: dissipate
-      QUARKUS_DATASOURCE_READDB_REACTIVE_URL: vertx-reactive:postgresql://read-db:5432/dissipate
-      QUARKUS_DATASOURCE_READDB_USERNAME: dissipate
-      QUARKUS_DATASOURCE_READDB_PASSWORD: dissipate
       QUARKUS_HIBERNATE_ORM_DATABASE_GENERATION: update
       QUARKUS_HTTP_HOST: 0.0.0.0
       QUARKUS_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4317
@@ -83,9 +79,9 @@ services:
     user: postgres
     restart: always
     environment:
-      POSTGRES_USER: dissipate
-      POSTGRES_PASSWORD: dissipate
-      POSTGRES_DB: dissipate
+      POSTGRES_USER: civic_center
+      POSTGRES_PASSWORD: civic_center
+      POSTGRES_DB: civic_center
       POSTGRES_HOST_AUTH_METHOD: "scram-sha-256\nhost replication all 0.0.0.0/0 md5"
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
     command: |
@@ -141,7 +137,7 @@ services:
     command:
       - mvn
       - flyway:migrate
-      - -Dflyway.url=jdbc:postgresql://main-db:5432/dissipate
+      - -Dflyway.url=jdbc:postgresql://main-db:5432/civic_center
       - -Dflyway.user=dissipate
       - -Dflyway.password=dissipate
 
